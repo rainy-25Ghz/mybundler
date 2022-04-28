@@ -7,7 +7,7 @@ const { transformFromAst } = require('babel-core') // babel-core
 let ID = 0
 
 /**
- *  获得文件內容， 從而在下面做語法樹分析
+ *  获得文件內容，解析ast语法树
  * @param {*} filename
  */
 function createAsset(filename) {
@@ -16,9 +16,10 @@ function createAsset(filename) {
         sourceType: 'module'
     })
 
-    const dependencies = [] // 初始化依赖 dependencies存放該文件依賴項的相對path
+    const dependencies = [] // 初始化依赖 dependencies存放该文件依赖项的相对path
 
-    traverse(ast, { // 聲明traverse的statement， 這裏進ImportDeclaration 這個statement內。然後對節點import的依賴值進行push進依賴集
+    //push到dependencies中
+    traverse(ast, { 
         ImportDeclaration: ({ node }) => {
             dependencies.push(node.source.value)
         }
@@ -26,11 +27,12 @@ function createAsset(filename) {
 
     const id = ID++ // id自增
 
-    const { code } = transformFromAst(ast, null, { // 再將ast轉換爲文件
+    //再把ast转为commonjs code
+    const { code } = transformFromAst(ast, null, { 
         presets: ['env']
     })
 
-    // 返回這麼模塊的所有信息，設置的id filename 依賴集 代碼
+    // 返回模块的信息，包括设置的id 文件名 依赖数组 代码
     return {
         id,
         filename,
@@ -40,33 +42,34 @@ function createAsset(filename) {
 }
 
 /**
- *從entry入口進行解析依賴圖譜
+ *从entry入口解析依赖图
  * @param {*} entry
  */
 function createGraph(entry) {
-    const mainAsset = createAsset(entry) // 從入口文件開始
-    const queue = [mainAsset] // 最初的依賴集
+    const mainAsset = createAsset(entry) // 入口文件开始解析模块信息
+    const queue = [mainAsset] // 一个队列，存储模块的信息，用于BFS
 
-    for (const asset of queue) { // 一張圖常見的遍歷算法有廣度遍歷與深度遍歷,這裏採用的是廣度遍歷
-        asset.mapping = {} // 給當前依賴做mapping記錄
-        const dirname = path.dirname(asset.filename)// 獲得依賴模塊地址
-        asset.dependencies.forEach(relativePath => { // 剛開始只有一個asset 但是dependencies可能多個
-            const absolutePath = path.join(dirname, relativePath)// 這邊獲得絕對路徑
-            const child = createAsset(absolutePath) // 遞歸依賴的依賴
-            asset.mapping[relativePath] = child.id // 將當前依賴及依賴的依賴都放入到mappnig裏
-            queue.push(child) // 廣度遍歷藉助隊列
+    for (const asset of queue) { // 广度遍历图
+        asset.mapping = {} // 一个map，存储模块依赖的path-->id
+        const dirname = path.dirname(asset.filename)// 获得当前模块所在文件夹地址
+        asset.dependencies.forEach(relativePath => { 
+            const absolutePath = path.join(dirname, relativePath)// 绝对路径
+            const child = createAsset(absolutePath) // 创建依赖的模块信息
+            asset.mapping[relativePath] = child.id // 存储模块依赖的path-->id
+            queue.push(child) // bfs
         })
     }
 
-    return queue // 返回遍歷完依賴的隊列
+    return queue // 返回解析后的队列
 }
 
 /**
- * 將graph模塊打包bundle輸出
+ * 將graph打包
  * @param {*} graph
  */
 function bundle(graph) {
     let modules = ''
+    //根据依赖图生成模块id-->数组(包含模块代码以及一个path与依赖id的map)
     graph.forEach(mod => {
         modules += `${mod.id}: [
       function (require, module, exports) { ${mod.code} },
@@ -74,7 +77,7 @@ function bundle(graph) {
     ],`
     })
 
-    // CommonJS風格
+    // CommonJS风格的模块打包
     const result = `
     (function(modules) {
       function require(id) {
